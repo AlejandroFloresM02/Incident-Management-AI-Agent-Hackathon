@@ -39,10 +39,11 @@ class Incident(BaseModel):
     )
     tags: List[str] = Field(default_factory=list)
     created_at: datetime
-
+    resolved_at: Optional[datetime] = None
     # Only present on historical incidents (in the vector store)
     resolution: Optional[str] = None
     rca_summary: Optional[str] = None
+    requires_human_approval: bool = False
 
 
 class RetrievalResult(BaseModel):

@@ -1,23 +1,13 @@
 {
-  "ticket_id": "INC-2026-4821",
+  "id": "INC-2026-4821",
   "title": "Payment Service HTTP 504",
-  "description": "payment-service experiencing http 504. Error rate spiked to 12.4%.",
+  "description": "payment-service experiencing HTTP 504 errors. Error rate spiked to 12.4% under elevated traffic; upstream calls from checkout-api and notification-svc began failing shortly after.",
+  "severity": "P1",
   "service": "payment-service",
-  "environment": "prod-us-east-1",
-  "status": "resolved",
+  "tags": ["prod-us-east-1", "HTTP_504", "DB_POOL_EXHAUSTED", "timeout", "traffic-spike"],
   "created_at": "2025-11-14T08:22:00Z",
   "resolved_at": "2025-11-14T12:45:00Z",
-  "error_codes": ["HTTP_504", "DB_POOL_EXHAUSTED"],
-  "logs_snippet": "[2025-11-14T08:22:00Z] ERROR payment-service: HTTP_504 - Connection refused\n...",
-  "rca_summary": "Root cause: HTTP_504 triggered by traffic spike. Mitigated via scaling.",
-  "resolution": ["Increased upstream timeout threshold", "Rolled back payment-service...", "..."],
-  "impact_scope": {
-    "affected_users_percent": 12.5,
-    "revenue_impact": "high",
-    "downstream_services": ["checkout-api", "notification-svc"]
-  },
-  "ai_metadata": {
-    "ground_truth_rca": "HTTP_504 due to configuration drift under load",
-    "expected_resolution_steps": ["Rollback", "Resource tuning", "Health verification"]
-  }
+  "resolution": "Increased upstream timeout threshold; rolled back payment-service to prior release; verified health on checkout-api and notification-svc.",
+  "rca_summary": "HTTP 504s caused by configuration drift exposed under a traffic spike — upstream timeouts were too tight and the DB pool exhausted before autoscaling caught up. Mitigated by rolling back and tuning timeouts.",
+  "requires_human_approval": false
 }
