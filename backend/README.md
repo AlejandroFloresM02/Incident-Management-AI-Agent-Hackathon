@@ -4,34 +4,60 @@ Python 3.11+, FastAPI, LangChain, LangGraph, ChromaDB, Ollama.
 
 ## Setup (once)
 
-```bash
-python -m venv .venv
-source .venv/bin/activate                # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env                     # then edit if needed
+The team is on TCS-issued Windows laptops, so commands below are PowerShell. Adapt to bash on macOS/Linux.
+
+We use `uv` for fast dependency installs. On TCS machines pass `--native-tls` so uv trusts the corporate root CA:
+
+```powershell
+# from backend/
+uv venv
+.venv\Scripts\Activate.ps1
+uv pip install --native-tls -r requirements.txt
 ```
 
-Make sure Ollama is running locally and the models are pulled — see the [root README](../README.md#quickstart).
+If `Activate.ps1` is blocked by execution policy:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+To avoid passing `--native-tls` every time, set it once for your user:
+
+```powershell
+[Environment]::SetEnvironmentVariable("UV_NATIVE_TLS", "true", "User")
+```
+
+`.env` is optional — the committed defaults in [.env.example](.env.example) target the models pre-installed on TCS laptops (`qwen-2.5.1-coder-it:latest` for generation, `gte-large:latest` for embeddings). Override only if needed:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Make sure Ollama is running locally before starting the API.
 
 ## Run
 
-```bash
+```powershell
 uvicorn api.main:app --reload --port 8000
 ```
 
 OpenAPI playground: <http://localhost:8000/docs>.
 
-Smoke test (from the `backend/` directory, in a second terminal):
+## Smoke test
 
-```bash
-curl http://localhost:8000/api/health
-# {"status":"ok"}
+In a second PowerShell window from `backend/`:
 
-curl -X POST http://localhost:8000/api/incident/analyze \
-  -H "Content-Type: application/json" \
-  --data-binary @api/sample_request.json | jq .summary
-# Note: `--data-binary` not `-d` — `-d` strips newlines and breaks JSON parsing.
+```powershell
+# Health
+curl.exe http://localhost:8000/api/health
+
+# Analyze the sample incident
+curl.exe -X POST http://localhost:8000/api/incident/analyze `
+  -H "Content-Type: application/json" `
+  --data-binary "@api/sample_request.json"
 ```
+
+Use `curl.exe` (not `curl`) on Windows — PowerShell aliases `curl` to `Invoke-WebRequest`, which doesn't accept these flags. Backtick (`` ` ``) is line-continuation.
 
 ## Folder map
 
@@ -45,6 +71,6 @@ Each subfolder has its own README.
 
 ## Conventions
 
-- All cross-component types live in `shared/schemas.py`. Import from there: `from shared.schemas import Incident, AgentResponse`.
+- All cross-component types live in `shared/schemas.py`. Import: `from shared.schemas import Incident, AgentResponse`.
 - All runtime config (model names, paths, CORS origins) lives in `shared/config.py` and reads from `.env`. Don't hardcode.
-- Don't commit `.env`, `chroma_db/`, or `data_gen/output/incidents.jsonl` — already in `.gitignore`.
+- Don't commit `.env`, `chroma_db/`, or `data_gen/output/incidents.jsonl` — already gitignored.

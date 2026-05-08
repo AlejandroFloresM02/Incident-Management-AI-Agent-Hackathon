@@ -1,0 +1,55 @@
+{
+  "summary": "The payments-api is returning elevated 5xx errors on /v1/charges in us-east-1 shortly after the v1.18.5 deploy. The strongest current clue is a NullPointerException in the retry handler when a cache miss occurs.",
+  "similar_incidents": [],
+  "suggested_steps": [
+    "Confirm the deploy timeline for payments-api v1.18.5 and check whether the error spike began immediately after rollout.",
+    "Inspect logs for /v1/charges and group stack traces to verify the NullPointerException in the retry handler is the dominant failure mode.",
+    "Roll back or disable the risky retry-handler change if the deploy correlation and stack traces line up.",
+    "Verify us-east-1 health after mitigation by watching 5xx rate, p95 latency, and checkout success metrics.",
+    "Open a follow-up bug to add cache-miss coverage for the retry handler before redeploying the fix."
+  ],
+  "rca": {
+    "summary": "payments-api began returning 5xx responses for /v1/charges in us-east-1 shortly after v1.18.5 was deployed. The available evidence points to a retry-handler regression triggered by cache misses.",
+    "root_cause": "A NullPointerException in the payments-api retry handler on cache miss likely caused requests to /v1/charges to fail with 5xx responses after the v1.18.5 deploy.",
+    "contributing_factors": [
+      "The issue appeared shortly after a production deploy.",
+      "The failure was region-specific to us-east-1.",
+      "The cache-miss retry path appears to have insufficient test coverage."
+    ],
+    "timeline": [
+      "2026-05-07T14:10:00Z - payments-api v1.18.5 deployed.",
+      "2026-05-07T14:22:00Z - PagerDuty fired for elevated /v1/charges 5xx rate.",
+      "2026-05-07T14:25:00Z - error rate reached 6.2% over a three-minute window.",
+      "2026-05-07T14:26:00Z - stack traces showed NullPointerException in the retry handler on cache miss."
+    ],
+    "preventive_actions": [
+      "Add regression tests for retry-handler cache-miss behavior.",
+      "Add a canary check for /v1/charges before full regional rollout.",
+      "Alert on sudden regional 5xx spikes immediately after deploys.",
+      "Require rollback criteria for payments-api deploys that affect charge creation."
+    ]
+  },
+  "confidence": 0.3,
+  "trace": [
+    {
+      "step": "summarize",
+      "detail": "Generated an incident summary grounded in the submitted ticket."
+    },
+    {
+      "step": "retrieve",
+      "detail": "Vectorstore unavailable; continuing without retrieved similar incidents."
+    },
+    {
+      "step": "suggest",
+      "detail": "No retrieved incidents available; returned a generic deploy-regression response playbook."
+    },
+    {
+      "step": "rca",
+      "detail": "Generated a structured RCA from the submitted incident evidence."
+    },
+    {
+      "step": "finalize",
+      "detail": "Assembled final response with 0 retrieved incidents and confidence 0.30."
+    }
+  ]
+}
