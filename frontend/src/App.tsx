@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   Alert,
   AppBar,
@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   CssBaseline,
   Divider,
   Drawer,
@@ -35,7 +36,10 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import TroubleshootOutlinedIcon from '@mui/icons-material/TroubleshootOutlined'
 import { FaPaperPlane } from 'react-icons/fa'
 
+import type { AgentResponse, Incident, RCA, Severity } from './types'
+
 const drawerWidth = 264
+const API_BASE = 'http://localhost:8000'
 
 const sampleIncident = `INC-48291 | P1 | Checkout API latency spike
 Service: payments-gateway
@@ -43,14 +47,6 @@ Window: 10:12-10:38 UTC
 Symptoms: 38% increase in 5xx responses, p95 latency above 8s, queue depth rising.
 Recent change: fraud scoring model rollout at 09:55 UTC.
 Logs: upstream timeout from fraud-score-v3, circuit breaker opened, retry storm detected.`
-
-const resolutionSteps = [
-  'Pause the fraud-score-v3 rollout and route traffic back to the stable v2 endpoint.',
-  'Reduce payment gateway retry attempts from 3 to 1 while upstream latency remains elevated.',
-  'Clear the delayed payment authorization queue in controlled batches.',
-  'Monitor 5xx rate, p95 latency, queue depth, and circuit breaker status for 30 minutes.',
-  'Re-enable the rollout only after fraud scoring p95 remains below 750ms for two release windows.',
-]
 
 const theme = createTheme({
   palette: {
@@ -191,31 +187,89 @@ function SectionCard({
   )
 }
 
+function LoadingBlock({ label }: { label: string }) {
+  return (
+    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', py: 3, px: 1 }}>
+      <CircularProgress size={22} />
+      <Typography color="text.secondary">{label}</Typography>
+    </Stack>
+  )
+}
+
+function buildIncident(text: string): Incident {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean)
+  const title = lines[0]?.slice(0, 200) || 'Untitled incident'
+  const severityMatch = text.match(/\bP[1-4]\b/)
+  return {
+    id: `INC-${Date.now()}`,
+    title,
+    description: text,
+    severity: (severityMatch?.[0] as Severity | undefined) ?? 'P2',
+    service: 'unknown',
+    tags: [],
+    created_at: new Date().toISOString(),
+  }
+}
+
+function confidenceColor(c: number): 'error' | 'warning' | 'success' {
+  if (c < 0.4) return 'error'
+  if (c < 0.7) return 'warning'
+  return 'success'
+}
+
+function formatRCA(rca: RCA): string {
+  return [
+    rca.summary,
+    '',
+    `Root cause: ${rca.root_cause}`,
+    '',
+    'Contributing factors:',
+    ...rca.contributing_factors.map((f) => `- ${f}`),
+    '',
+    'Timeline:',
+    ...rca.timeline.map((t) => `- ${t}`),
+    '',
+    'Preventive actions:',
+    ...rca.preventive_actions.map((a) => `- ${a}`),
+  ].join('\n')
+}
+
 export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [incidentText, setIncidentText] = useState(sampleIncident)
   const [fileName, setFileName] = useState('')
-  const [status, setStatus] = useState('Mock analysis ready')
+  const [loading, setLoading] = useState(false)
+  const [response, setResponse] = useState<AgentResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const summarizedIssue = useMemo(
-    () =>
-      'Payments checkout is experiencing elevated latency and 5xx errors after the fraud-score-v3 rollout. Logs point to upstream timeout failures, retry amplification, and an open circuit breaker causing authorization queues to grow.',
-    [],
-  )
-
-  const rcaReport = useMemo(
-    () =>
-      'Root cause: fraud-score-v3 introduced slower response behavior under production traffic, which exceeded the payment gateway timeout budget. The gateway retried failed calls aggressively, amplifying load and delaying queued authorizations.\n\nImpact: checkout users saw intermittent payment failures and slow confirmations for approximately 26 minutes. No evidence of data loss is present in the supplied logs.\n\nCorrective actions: roll back the model endpoint, tune retry policy, add rollout guardrails for dependency p95 latency, and require circuit breaker telemetry checks before future model promotions.',
-    [],
-  )
+  const analyze = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const resp = await fetch(`${API_BASE}/api/incident/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildIncident(incidentText)),
+      })
+      if (!resp.ok) {
+        const body = await resp.text()
+        throw new Error(`HTTP ${resp.status}: ${body.slice(0, 240)}`)
+      }
+      const data: AgentResponse = await resp.json()
+      setResponse(data)
+    } catch (e) {
+      setResponse(null)
+      setError(e instanceof Error ? e.message : 'unknown error')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
     setFileName(file.name)
-    setStatus(`Loaded ${file.name} for mock analysis`)
-
     const reader = new FileReader()
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -225,9 +279,57 @@ export default function App() {
     reader.readAsText(file)
   }
 
-  const handleAction = (message: string) => {
-    setStatus(message)
-  }
+  const summary = response?.summary ?? ''
+  const steps = response?.suggested_steps ?? []
+  const rcaText = response ? formatRCA(response.rca) : ''
+
+  const headerChip = loading ? (
+    <Chip
+      icon={<CircularProgress size={14} sx={{ ml: 0.5, color: 'inherit' }} />}
+      label="Analyzing"
+      sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+    />
+  ) : error ? (
+    <Chip
+      color="error"
+      label="Error"
+      sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+    />
+  ) : response ? (
+    <Chip
+      color={confidenceColor(response.confidence)}
+      label={`Confidence ${response.confidence.toFixed(2)}`}
+      sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+    />
+  ) : (
+    <Chip
+      color="secondary"
+      label="Idle"
+      sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+    />
+  )
+
+  const statusAlert = error ? (
+    <Alert severity="error" action={
+      <Button color="inherit" size="small" onClick={analyze} disabled={loading}>
+        Retry
+      </Button>
+    }>
+      Agent error: {error}
+    </Alert>
+  ) : loading ? (
+    <Alert severity="info" icon={<CircularProgress size={20} />}>
+      Generating analysis... first call can take 30-60 s while Ollama warms up.
+    </Alert>
+  ) : response ? (
+    <Alert severity="success" icon={<AutoFixHighOutlinedIcon />}>
+      Analysis complete - confidence {response.confidence.toFixed(2)}.
+    </Alert>
+  ) : (
+    <Alert severity="info" icon={<AutoFixHighOutlinedIcon />}>
+      Paste an incident below and click Analyze Incident to query the agent.
+    </Alert>
+  )
 
   return (
     <ThemeProvider theme={theme}>
@@ -261,7 +363,7 @@ export default function App() {
                 Triage logs, retrieve precedent, and draft RCA notes from one focused workspace.
               </Typography>
             </Box>
-            <Chip color="secondary" label="Mock mode" sx={{ display: { xs: 'none', sm: 'inline-flex' } }} />
+            {headerChip}
           </Toolbar>
         </AppBar>
 
@@ -301,9 +403,7 @@ export default function App() {
           }}
         >
           <Stack spacing={3}>
-            <Alert severity="info" icon={<AutoFixHighOutlinedIcon />}>
-              {status}
-            </Alert>
+            {statusAlert}
 
             <Paper sx={{ p: { xs: 2, md: 3 } }}>
               <Stack spacing={2.5}>
@@ -326,16 +426,23 @@ export default function App() {
                       component="label"
                       variant="outlined"
                       startIcon={<CloudUploadOutlinedIcon />}
+                      disabled={loading}
                     >
                       Upload Logs
-                      <input hidden type="file" accept=".txt,.log,.json,.csv,.md" onChange={handleFileUpload} />
+                      <input
+                        hidden
+                        type="file"
+                        accept=".txt,.log,.json,.csv,.md"
+                        onChange={handleFileUpload}
+                      />
                     </Button>
                     <Button
                       variant="contained"
-                      startIcon={<TroubleshootOutlinedIcon />}
-                      onClick={() => handleAction('Incident analysis generated from mock intelligence')}
+                      startIcon={loading ? <CircularProgress size={16} sx={{ color: 'inherit' }} /> : <TroubleshootOutlinedIcon />}
+                      onClick={analyze}
+                      disabled={loading || !incidentText.trim()}
                     >
-                      Analyze Incident
+                      {loading ? 'Analyzing...' : 'Analyze Incident'}
                     </Button>
                   </Stack>
                 </Stack>
@@ -348,19 +455,22 @@ export default function App() {
                   onChange={(event) => setIncidentText(event.target.value)}
                   placeholder="Paste incident logs, alert payloads, customer reports, or ticket notes here."
                   fullWidth
+                  disabled={loading}
                 />
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
                   <Button
                     variant="outlined"
                     startIcon={<FaPaperPlane />}
-                    onClick={() => handleAction('Incident sent for mock processing')}
+                    onClick={analyze}
+                    disabled={loading || !incidentText.trim()}
                   >
                     Send
                   </Button>
                   <Button
                     variant="outlined"
                     startIcon={<ArticleOutlinedIcon />}
-                    onClick={() => handleAction('RCA report generated with mock findings')}
+                    onClick={analyze}
+                    disabled={loading || !incidentText.trim()}
                   >
                     Generate RCA
                   </Button>
@@ -368,7 +478,7 @@ export default function App() {
                     variant="outlined"
                     color="secondary"
                     startIcon={<PostAddOutlinedIcon />}
-                    onClick={() => handleAction('JIRA ticket creation is ready for backend integration')}
+                    disabled
                   >
                     Create JIRA Ticket
                   </Button>
@@ -384,33 +494,52 @@ export default function App() {
               }}
             >
               <SectionCard title="Summarized Issue" icon={<ContentPasteSearchOutlinedIcon fontSize="small" />}>
-                <TextField
-                  value={summarizedIssue}
-                  multiline
-                  minRows={5}
-                  fullWidth
-                  slotProps={{ input: { readOnly: true } }}
-                />
+                {loading ? (
+                  <LoadingBlock label="Summarizing the incident..." />
+                ) : (
+                  <TextField
+                    value={summary || (response ? '' : 'Click Analyze Incident to generate a summary.')}
+                    multiline
+                    minRows={5}
+                    fullWidth
+                    slotProps={{ input: { readOnly: true } }}
+                  />
+                )}
               </SectionCard>
 
-              <SectionCard title="Suggested Resolution Steps" icon={<PlaylistAddCheckOutlinedIcon fontSize="small" />}>
-                <Box component="ol" sx={{ m: 0, pl: 3 }}>
-                  {resolutionSteps.map((step) => (
-                    <Typography component="li" key={step} sx={{ mb: 1.2, pl: 0.5 }}>
-                      {step}
-                    </Typography>
-                  ))}
-                </Box>
+              <SectionCard
+                title="Suggested Resolution Steps"
+                icon={<PlaylistAddCheckOutlinedIcon fontSize="small" />}
+              >
+                {loading ? (
+                  <LoadingBlock label="Drafting suggested steps..." />
+                ) : steps.length > 0 ? (
+                  <Box component="ol" sx={{ m: 0, pl: 3 }}>
+                    {steps.map((step, idx) => (
+                      <Typography component="li" key={`${idx}-${step}`} sx={{ mb: 1.2, pl: 0.5 }}>
+                        {step}
+                      </Typography>
+                    ))}
+                  </Box>
+                ) : (
+                  <Typography color="text.secondary">
+                    Click Analyze Incident to generate suggested steps.
+                  </Typography>
+                )}
               </SectionCard>
 
               <SectionCard title="RCA Report" icon={<FactCheckOutlinedIcon fontSize="small" />}>
-                <TextField
-                  value={rcaReport}
-                  multiline
-                  minRows={10}
-                  fullWidth
-                  slotProps={{ input: { readOnly: true } }}
-                />
+                {loading ? (
+                  <LoadingBlock label="Building structured RCA..." />
+                ) : (
+                  <TextField
+                    value={rcaText || (response ? '' : 'Click Analyze Incident to generate an RCA.')}
+                    multiline
+                    minRows={10}
+                    fullWidth
+                    slotProps={{ input: { readOnly: true } }}
+                  />
+                )}
               </SectionCard>
             </Box>
           </Stack>
