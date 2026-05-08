@@ -52,7 +52,6 @@ flowchart TB
     style SVC fill:transparent,stroke-dasharray:0,stroke:transparent
 ```
 
-> **On the diagram:** this is rendered with Mermaid (built-in to GitHub). If the team prefers Excalidraw, draw the diagram at <https://excalidraw.com>, export as PNG with embedded scene, save to `docs/architecture.excalidraw.png`, and replace the Mermaid block above with `![Architecture](./docs/architecture.excalidraw.png)`. The `.png` is re-editable in Excalidraw.
 
 ## Repo layout
 
