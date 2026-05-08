@@ -14,7 +14,7 @@ SUMMARIZE_PROMPT = ChatPromptTemplate.from_messages(
         (
             "human",
             "Summarize this incident for an on-call engineer in 2-4 concise "
-            "sentences.\n\nIncident:\n{incident}",
+            "sentences of plain prose.\n\nIncident:\n{incident}",
         ),
     ]
 )

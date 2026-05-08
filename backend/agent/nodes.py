@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import re
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, Field
 
 from shared.schemas import RCA, RetrievalResult, TraceStep
 
@@ -33,6 +36,19 @@ def _message_text(message: Any) -> str:
                 parts.append(item["text"])
         return "\n".join(parts).strip()
     return str(content).strip()
+
+
+_TEMPLATE_TOKEN_RE = re.compile(r"<\|[^|>]*\|>")
+_CODE_FENCE_RE = re.compile(r"^\s*```[a-zA-Z0-9]*\s*$", re.MULTILINE)
+
+
+def _clean_llm_text(text: str) -> str:
+    """Strip chat-template tokens (e.g. <|im_start|>) and code-fence wrapper lines."""
+    if not text:
+        return ""
+    cleaned = _TEMPLATE_TOKEN_RE.sub("", text)
+    cleaned = _CODE_FENCE_RE.sub("", cleaned)
+    return "\n".join(line.rstrip() for line in cleaned.splitlines()).strip()
 
 
 def _format_similar_incidents(results: list[RetrievalResult]) -> str:
@@ -118,10 +134,27 @@ def _ensure_rca_fields(rca_result: RCA, state: "AgentState") -> RCA:
     return rca_result
 
 
+class _IncidentSummary(BaseModel):
+    summary: str = Field(
+        description="2-4 sentence plain-prose summary of the incident for an on-call engineer."
+    )
+
+
 def summarize(state: "AgentState") -> dict:
-    chain = SUMMARIZE_PROMPT | get_llm()
-    response = chain.invoke({"incident": _incident_text(state)})
-    summary = _message_text(response)
+    detail = "Generated incident summary with one LLM call."
+    summary = ""
+    try:
+        chain = SUMMARIZE_PROMPT | get_llm().with_structured_output(_IncidentSummary)
+        result = chain.invoke({"incident": _incident_text(state)})
+        if not isinstance(result, _IncidentSummary):
+            result = _IncidentSummary.model_validate(result)
+        summary = _clean_llm_text(result.summary)
+    except Exception as exc:
+        detail = (
+            "Structured summary generation failed; using deterministic fallback. "
+            f"Reason: {type(exc).__name__}: {exc}"
+        )
+
     if not summary:
         summary = (
             f"{state['incident'].severity} incident on "
@@ -130,12 +163,7 @@ def summarize(state: "AgentState") -> dict:
 
     return {
         "summary": summary,
-        "trace": [
-            TraceStep(
-                step="summarize",
-                detail="Generated incident summary with one LLM call.",
-            )
-        ],
+        "trace": [TraceStep(step="summarize", detail=detail)],
     }
 
 
@@ -188,7 +216,7 @@ def suggest(state: "AgentState") -> dict:
             "similar_incidents": _format_similar_incidents(similar_incidents),
         }
     )
-    steps = _parse_steps(_message_text(response))
+    steps = _parse_steps(_clean_llm_text(_message_text(response)))
     if len(steps) < 3:
         steps.extend(
             [
