@@ -1,0 +1,9 @@
+{
+  "id": "INC-2026-0507-001",
+  "title": "payments-api returning 5xx on /v1/charges",
+  "description": "PagerDuty fired at 14:22 UTC. Error rate on /v1/charges climbed from 0.1% to 6.2% over 3 minutes. Affected region appears to be us-east-1 only. v1.18.5 was deployed at 14:10. Stack traces show a NullPointerException in the retry handler on cache miss.",
+  "severity": "P1",
+  "service": "payments-api",
+  "tags": ["5xx", "deploy", "us-east-1"],
+  "created_at": "2026-05-07T14:22:00Z"
+}

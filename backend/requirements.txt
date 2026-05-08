@@ -1,0 +1,18 @@
+# Web framework
+fastapi[standard]>=0.115
+uvicorn[standard]>=0.32
+
+# Validation / contracts
+pydantic>=2.7
+python-dotenv>=1.0
+
+# LangChain / LangGraph / Ollama / Chroma
+langchain>=0.3
+langchain-core>=0.3
+langchain-ollama>=0.2
+langchain-chroma>=0.1
+langgraph>=0.2
+chromadb>=0.5
+
+# Misc utilities
+httpx>=0.27
