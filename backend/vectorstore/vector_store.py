@@ -1,61 +1,47 @@
-# vector_store.py
-"""
-Vector Store Contract:
-- ingest(jsonl_path) -> None: Idempotent upsert of historical incidents
-- search(query, k) -> List[RetrievalResult]: Similarity search with [0,1] scores
+"""IncidentVectorStore: idempotent upsert + cosine similarity search over Chroma.
 
-Design Decisions:
-1. Idempotency: Uses `id` as Chroma document ID. Re-running ingest upserts existing records.
-2. Embedding Text: Problem context only (title + description + tags). Resolution/RCA stored as metadata.
-3. Similarity Scoring: Normalizes cosine distance [0, 2] -> [0, 1].
+Contract:
+- ingest(jsonl_path) -> int: upserts historical incidents, returns count.
+- search(query, k) -> list[RetrievalResult]: similarity scores normalized to [0, 1].
+
+Embedding text covers problem context only (title + description + tags); resolution
+and RCA are stored as metadata so retrieval matches "similar problem" rather than
+"similar fix". Distances are converted from cosine [0, 2] to similarity [0, 1].
 """
+from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List
 
 import chromadb
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
-from pydantic import BaseModel, Field
 
-# ---------------------------------------------------------------------------
-# INLINE SCHEMAS (Temporary for immediate testing. Revert to backend.shared.schemas later)
-# ---------------------------------------------------------------------------
-Severity = Literal["P1", "P2", "P3", "P4"]
-
-class Incident(BaseModel):
-    id: str
-    title: str
-    description: str
-    severity: Severity
-    service: str
-    tags: List[str] = Field(default_factory=list)
-    created_at: datetime
-    resolved_at: Optional[datetime] = None
-    resolution: Optional[str] = None
-    rca_summary: Optional[str] = None
-    requires_human_approval: bool = False
-
-class RetrievalResult(BaseModel):
-    incident: Incident
-    similarity: float = Field(ge=0.0, le=1.0, description="Cosine similarity score in [0, 1].")
+from shared.config import (
+    CHROMA_COLLECTION,
+    CHROMA_PERSIST_DIR,
+    EMBEDDING_MODEL,
+    OLLAMA_BASE_URL,
+)
+from shared.schemas import Incident, RetrievalResult
 
 logger = logging.getLogger(__name__)
 
 class IncidentVectorStore:
     def __init__(
         self,
-        persist_directory: str = "./chroma_incidents",
-        collection_name: str = "historical_kb",
-        embedding_model: str = "gte-large",
+        persist_directory: str = CHROMA_PERSIST_DIR,
+        collection_name: str = CHROMA_COLLECTION,
+        embedding_model: str = EMBEDDING_MODEL,
     ):
         self.persist_dir = persist_directory
         self.collection_name = collection_name
-        self.embedder = OllamaEmbeddings(model=embedding_model)
+        self.embedder = OllamaEmbeddings(
+            model=embedding_model, base_url=OLLAMA_BASE_URL
+        )
         self._client, self._chroma_store = self._init_chroma()
 
     def _init_chroma(self) -> tuple[chromadb.PersistentClient, Chroma]:
@@ -143,26 +129,18 @@ class IncidentVectorStore:
 
         return results
 
-# ---------------------------------------------------------------------------
-# Quick Test Runner
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    
-    # 1. Initialize VDB
-    vdb = IncidentVectorStore(persist_directory="./chroma_incidents")
-    
-    # 2. Ingest JSONL (creates/updates the DB)
-    if os.path.exists("incidents.jsonl"):
-        vdb.ingest("incidents.jsonl")
-    else:
-        print("⚠️ incidents.jsonl not found. Place your generated file in the same directory.")
 
-    # 3. Test Search
+    vdb = IncidentVectorStore()
+    jsonl_path = Path(__file__).parent / "incidents.jsonl"
+    if jsonl_path.exists():
+        vdb.ingest(str(jsonl_path))
+    else:
+        print(f"incidents.jsonl not found at {jsonl_path}")
+
     query = "payment service timing out during traffic spike"
-    print(f"\n🔍 Searching: '{query}'")
-    results = vdb.search(query, k=2)
-    for i, res in enumerate(results, 1):
-        print(f"\n#{i} | Similarity: {res.similarity:.3f} | ID: {res.incident.id}")
-        print(f"   Title: {res.incident.title}")
-        print(f"   Resolution: {res.incident.resolution}")
+    print(f"\nSearching: {query!r}")
+    for i, res in enumerate(vdb.search(query, k=2), 1):
+        print(f"#{i} | similarity {res.similarity:.3f} | {res.incident.id}: {res.incident.title}")
+        print(f"   resolution: {res.incident.resolution}")
