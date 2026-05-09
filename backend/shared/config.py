@@ -17,7 +17,7 @@ load_dotenv(_BACKEND_DIR / ".env")
 
 # --- Ollama ---------------------------------------------------------------
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen-2.5.1-coder-it:latest")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.2-3b-it:latest")
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "gte-large:latest")
 
 

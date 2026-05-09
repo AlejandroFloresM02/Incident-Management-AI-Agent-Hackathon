@@ -9,4 +9,5 @@ def get_llm(temperature: float = 0.1) -> ChatOllama:
         model = LLM_MODEL,
         base_url = OLLAMA_BASE_URL,
         temperature = temperature,
+        keep_alive = "30m",
     )
