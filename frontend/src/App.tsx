@@ -217,6 +217,13 @@ function confidenceColor(c: number): 'error' | 'warning' | 'success' {
   return 'success'
 }
 
+const severityChipSx: Record<Severity, { bgcolor: string; color: string }> = {
+  P1: { bgcolor: '#dc2626', color: '#ffffff' },
+  P2: { bgcolor: '#f59e0b', color: '#ffffff' },
+  P3: { bgcolor: '#facc15', color: '#172033' },
+  P4: { bgcolor: '#9ca3af', color: '#ffffff' },
+}
+
 function formatRCA(rca: RCA): string {
   return [
     rca.summary,
@@ -504,6 +511,71 @@ export default function App() {
                     fullWidth
                     slotProps={{ input: { readOnly: true } }}
                   />
+                )}
+              </SectionCard>
+
+              <SectionCard
+                title="Similar Past Incidents"
+                icon={<HistoryOutlinedIcon fontSize="small" />}
+              >
+                {loading ? (
+                  <LoadingBlock label="Searching the historical knowledge base..." />
+                ) : !response ? (
+                  <Typography color="text.secondary">
+                    Click Analyze Incident to retrieve similar past incidents.
+                  </Typography>
+                ) : response.similar_incidents.length === 0 ? (
+                  <Typography color="text.secondary">
+                    No similar incidents above the similarity threshold.
+                  </Typography>
+                ) : (
+                  <Stack spacing={1.5}>
+                    {response.similar_incidents.map((r) => (
+                      <Box
+                        key={r.incident.id}
+                        sx={{
+                          border: '1px solid #e4e8f0',
+                          borderRadius: 1.5,
+                          p: 1.5,
+                          bgcolor: '#fafbfd',
+                        }}
+                      >
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ alignItems: 'center', mb: 0.75, flexWrap: 'wrap' }}
+                        >
+                          <Chip
+                            size="small"
+                            label={r.incident.severity}
+                            sx={{ ...severityChipSx[r.incident.severity], fontWeight: 700 }}
+                          />
+                          <Chip
+                            size="small"
+                            color={confidenceColor(r.similarity)}
+                            label={`${Math.round(r.similarity * 100)}% match`}
+                          />
+                          <Typography variant="caption" color="text.secondary">
+                            {r.incident.id} - {r.incident.service}
+                          </Typography>
+                        </Stack>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                          {r.incident.title}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                          {r.incident.description}
+                        </Typography>
+                        {r.incident.resolution && (
+                          <Typography variant="body2">
+                            <Box component="span" sx={{ fontWeight: 700 }}>
+                              Resolution:
+                            </Box>{' '}
+                            {r.incident.resolution}
+                          </Typography>
+                        )}
+                      </Box>
+                    ))}
+                  </Stack>
                 )}
               </SectionCard>
 
