@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Alert,
   AppBar,
@@ -33,10 +33,10 @@ import MenuIcon from '@mui/icons-material/Menu'
 import PlaylistAddCheckOutlinedIcon from '@mui/icons-material/PlaylistAddCheckOutlined'
 import PostAddOutlinedIcon from '@mui/icons-material/PostAddOutlined'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
+import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined'
 import TroubleshootOutlinedIcon from '@mui/icons-material/TroubleshootOutlined'
-import { FaPaperPlane } from 'react-icons/fa'
 
-import type { AgentResponse, Incident, RCA, Severity } from './types'
+import type { AgentResponse, Incident, Severity } from './types'
 
 const drawerWidth = 264
 const API_BASE = 'http://localhost:8000'
@@ -224,21 +224,86 @@ const severityChipSx: Record<Severity, { bgcolor: string; color: string }> = {
   P4: { bgcolor: '#9ca3af', color: '#ffffff' },
 }
 
-function formatRCA(rca: RCA): string {
-  return [
-    rca.summary,
-    '',
-    `Root cause: ${rca.root_cause}`,
-    '',
-    'Contributing factors:',
-    ...rca.contributing_factors.map((f) => `- ${f}`),
-    '',
-    'Timeline:',
-    ...rca.timeline.map((t) => `- ${t}`),
-    '',
-    'Preventive actions:',
-    ...rca.preventive_actions.map((a) => `- ${a}`),
-  ].join('\n')
+const subcardSx = {
+  border: '1px solid #e4e8f0',
+  borderRadius: 1.5,
+  p: 1.75,
+  bgcolor: '#fafbfd',
+} as const
+
+const labelChipSx = {
+  fontWeight: 700,
+  bgcolor: '#e9f2ff',
+  color: '#1f6feb',
+  border: 0,
+  height: 22,
+} as const
+
+function RCASection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Box sx={subcardSx}>
+      <Chip label={label} size="small" sx={{ mb: 1, ...labelChipSx }} />
+      {children}
+    </Box>
+  )
+}
+
+function BulletList({ items }: { items: string[] }) {
+  return (
+    <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+      {items.map((item, idx) => (
+        <Typography
+          component="li"
+          variant="body2"
+          key={idx}
+          sx={{ mb: 0.5, lineHeight: 1.55 }}
+        >
+          {item}
+        </Typography>
+      ))}
+    </Box>
+  )
+}
+
+function TimelineList({ items }: { items: string[] }) {
+  return (
+    <Stack component="ul" spacing={0.85} sx={{ m: 0, pl: 0, listStyle: 'none' }}>
+      {items.map((line, idx) => {
+        const sep = line.indexOf(' - ')
+        const ts = sep > 0 ? line.slice(0, sep) : null
+        const rest = sep > 0 ? line.slice(sep + 3) : line
+        return (
+          <Stack
+            key={idx}
+            component="li"
+            direction="row"
+            spacing={1.25}
+            sx={{ alignItems: 'flex-start' }}
+          >
+            {ts && (
+              <Typography
+                variant="caption"
+                sx={{
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  fontWeight: 700,
+                  color: '#1f6feb',
+                  pt: 0.3,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+              >
+                {ts}
+              </Typography>
+            )}
+            <Typography variant="body2" sx={{ lineHeight: 1.55 }}>
+              {rest}
+            </Typography>
+          </Stack>
+        )
+      })}
+    </Stack>
+  )
 }
 
 export default function App() {
@@ -248,15 +313,23 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [response, setResponse] = useState<AgentResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
 
   const analyze = async () => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setLoading(true)
     setError(null)
+    setCancelled(false)
     try {
       const resp = await fetch(`${API_BASE}/api/incident/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildIncident(incidentText)),
+        signal: controller.signal,
       })
       if (!resp.ok) {
         const body = await resp.text()
@@ -265,11 +338,21 @@ export default function App() {
       const data: AgentResponse = await resp.json()
       setResponse(data)
     } catch (e) {
-      setResponse(null)
-      setError(e instanceof Error ? e.message : 'unknown error')
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setResponse(null)
+        setCancelled(true)
+      } else {
+        setResponse(null)
+        setError(e instanceof Error ? e.message : 'unknown error')
+      }
     } finally {
+      if (abortRef.current === controller) abortRef.current = null
       setLoading(false)
     }
+  }
+
+  const cancelAnalyze = () => {
+    abortRef.current?.abort()
   }
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -288,7 +371,6 @@ export default function App() {
 
   const summary = response?.summary ?? ''
   const steps = response?.suggested_steps ?? []
-  const rcaText = response ? formatRCA(response.rca) : ''
 
   const headerChip = loading ? (
     <Chip
@@ -327,6 +409,10 @@ export default function App() {
   ) : loading ? (
     <Alert severity="info" icon={<CircularProgress size={20} />}>
       Generating analysis... first call can take 30-60 s while Ollama warms up.
+    </Alert>
+  ) : cancelled ? (
+    <Alert severity="warning" icon={<StopCircleOutlinedIcon />}>
+      Analysis cancelled. Adjust the incident and Analyze again when ready.
     </Alert>
   ) : response ? (
     <Alert severity="success" icon={<AutoFixHighOutlinedIcon />}>
@@ -443,14 +529,25 @@ export default function App() {
                         onChange={handleFileUpload}
                       />
                     </Button>
-                    <Button
-                      variant="contained"
-                      startIcon={loading ? <CircularProgress size={16} sx={{ color: 'inherit' }} /> : <TroubleshootOutlinedIcon />}
-                      onClick={analyze}
-                      disabled={loading || !incidentText.trim()}
-                    >
-                      {loading ? 'Analyzing...' : 'Analyze Incident'}
-                    </Button>
+                    {loading ? (
+                      <Button
+                        variant="contained"
+                        color="error"
+                        startIcon={<StopCircleOutlinedIcon />}
+                        onClick={cancelAnalyze}
+                      >
+                        Stop Analysis
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="contained"
+                        startIcon={<TroubleshootOutlinedIcon />}
+                        onClick={analyze}
+                        disabled={!incidentText.trim()}
+                      >
+                        Analyze Incident
+                      </Button>
+                    )}
                   </Stack>
                 </Stack>
 
@@ -465,14 +562,6 @@ export default function App() {
                   disabled={loading}
                 />
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<FaPaperPlane />}
-                    onClick={analyze}
-                    disabled={loading || !incidentText.trim()}
-                  >
-                    Send
-                  </Button>
                   <Button
                     variant="outlined"
                     startIcon={<ArticleOutlinedIcon />}
@@ -503,14 +592,19 @@ export default function App() {
               <SectionCard title="Summarized Issue" icon={<ContentPasteSearchOutlinedIcon fontSize="small" />}>
                 {loading ? (
                   <LoadingBlock label="Summarizing the incident..." />
+                ) : summary ? (
+                  <Box sx={subcardSx}>
+                    <Typography
+                      variant="body1"
+                      sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}
+                    >
+                      {summary}
+                    </Typography>
+                  </Box>
                 ) : (
-                  <TextField
-                    value={summary || (response ? '' : 'Click Analyze Incident to generate a summary.')}
-                    multiline
-                    minRows={5}
-                    fullWidth
-                    slotProps={{ input: { readOnly: true } }}
-                  />
+                  <Typography color="text.secondary">
+                    Click Analyze Incident to generate a summary.
+                  </Typography>
                 )}
               </SectionCard>
 
@@ -586,13 +680,29 @@ export default function App() {
                 {loading ? (
                   <LoadingBlock label="Drafting suggested steps..." />
                 ) : steps.length > 0 ? (
-                  <Box component="ol" sx={{ m: 0, pl: 3 }}>
+                  <Stack spacing={1.5}>
                     {steps.map((step, idx) => (
-                      <Typography component="li" key={`${idx}-${step}`} sx={{ mb: 1.2, pl: 0.5 }}>
-                        {step}
-                      </Typography>
+                      <Box key={`${idx}-${step}`} sx={subcardSx}>
+                        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+                          <Avatar
+                            sx={{
+                              width: 28,
+                              height: 28,
+                              bgcolor: '#1f6feb',
+                              color: 'white',
+                              fontSize: 13,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {idx + 1}
+                          </Avatar>
+                          <Typography variant="body2" sx={{ pt: 0.4, lineHeight: 1.55 }}>
+                            {step}
+                          </Typography>
+                        </Stack>
+                      </Box>
                     ))}
-                  </Box>
+                  </Stack>
                 ) : (
                   <Typography color="text.secondary">
                     Click Analyze Incident to generate suggested steps.
@@ -603,14 +713,38 @@ export default function App() {
               <SectionCard title="RCA Report" icon={<FactCheckOutlinedIcon fontSize="small" />}>
                 {loading ? (
                   <LoadingBlock label="Building structured RCA..." />
+                ) : !response ? (
+                  <Typography color="text.secondary">
+                    Click Analyze Incident to generate an RCA.
+                  </Typography>
                 ) : (
-                  <TextField
-                    value={rcaText || (response ? '' : 'Click Analyze Incident to generate an RCA.')}
-                    multiline
-                    minRows={10}
-                    fullWidth
-                    slotProps={{ input: { readOnly: true } }}
-                  />
+                  <Stack spacing={1.5}>
+                    {response.rca.summary && (
+                      <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
+                        {response.rca.summary}
+                      </Typography>
+                    )}
+                    <RCASection label="Root cause">
+                      <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
+                        {response.rca.root_cause}
+                      </Typography>
+                    </RCASection>
+                    {response.rca.contributing_factors.length > 0 && (
+                      <RCASection label="Contributing factors">
+                        <BulletList items={response.rca.contributing_factors} />
+                      </RCASection>
+                    )}
+                    {response.rca.timeline.length > 0 && (
+                      <RCASection label="Timeline">
+                        <TimelineList items={response.rca.timeline} />
+                      </RCASection>
+                    )}
+                    {response.rca.preventive_actions.length > 0 && (
+                      <RCASection label="Preventive actions">
+                        <BulletList items={response.rca.preventive_actions} />
+                      </RCASection>
+                    )}
+                  </Stack>
                 )}
               </SectionCard>
             </Box>

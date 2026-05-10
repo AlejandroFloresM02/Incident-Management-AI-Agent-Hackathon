@@ -40,7 +40,7 @@ def build_graph():
     return graph.compile()
 
 
-def run_agent(incident: Incident) -> AgentResponse:
+async def run_agent(incident: Incident) -> AgentResponse:
     initial_state: AgentState = {
         "incident": incident,
         "summary": "",
@@ -56,7 +56,7 @@ def run_agent(incident: Incident) -> AgentResponse:
         "confidence": 0.0,
         "trace": [],
     }
-    state = build_graph().invoke(initial_state)
+    state = await build_graph().ainvoke(initial_state)
 
     return AgentResponse(
         summary=state["summary"],

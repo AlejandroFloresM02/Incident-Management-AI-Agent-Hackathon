@@ -49,5 +49,5 @@ def health() -> dict[str, str]:
     tags=["incidents"],
     summary="Analyze a new incident: summarize, retrieve similar, suggest steps, generate RCA.",
 )
-def analyze_incident(incident: Incident) -> AgentResponse:
-    return run_agent(incident)
+async def analyze_incident(incident: Incident) -> AgentResponse:
+    return await run_agent(incident)

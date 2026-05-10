@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
@@ -140,15 +141,17 @@ class _IncidentSummary(BaseModel):
     )
 
 
-def summarize(state: "AgentState") -> dict:
+async def summarize(state: "AgentState") -> dict:
     detail = "Generated incident summary with one LLM call."
     summary = ""
     try:
         chain = SUMMARIZE_PROMPT | get_llm().with_structured_output(_IncidentSummary)
-        result = chain.invoke({"incident": _incident_text(state)})
+        result = await chain.ainvoke({"incident": _incident_text(state)})
         if not isinstance(result, _IncidentSummary):
             result = _IncidentSummary.model_validate(result)
         summary = _clean_llm_text(result.summary)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         detail = (
             "Structured summary generation failed; using deterministic fallback. "
@@ -167,18 +170,20 @@ def summarize(state: "AgentState") -> dict:
     }
 
 
-def retrieve(state: "AgentState") -> dict:
+async def retrieve(state: "AgentState") -> dict:
     incident = state["incident"]
     query = f"{incident.title}\n{incident.description}"
 
     try:
         search = _search_function()
-        raw_results = search(query, k=RETRIEVAL_K)
+        raw_results = await asyncio.to_thread(search, query, RETRIEVAL_K)
         results = _coerce_retrieval_results(raw_results)
         detail = (
             f"Vectorstore search returned {len(results)} incidents above "
             f"similarity threshold {SIMILARITY_THRESHOLD}."
         )
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         results = []
         detail = (
@@ -192,7 +197,7 @@ def retrieve(state: "AgentState") -> dict:
     }
 
 
-def suggest(state: "AgentState") -> dict:
+async def suggest(state: "AgentState") -> dict:
     similar_incidents = state.get("similar_incidents", [])
     if not similar_incidents:
         return {
@@ -210,7 +215,7 @@ def suggest(state: "AgentState") -> dict:
         }
 
     chain = SUGGEST_PROMPT | get_llm()
-    response = chain.invoke(
+    response = await chain.ainvoke(
         {
             "incident": _incident_text(state),
             "similar_incidents": _format_similar_incidents(similar_incidents),
@@ -238,11 +243,11 @@ def suggest(state: "AgentState") -> dict:
     }
 
 
-def rca(state: "AgentState") -> dict:
+async def rca(state: "AgentState") -> dict:
     incident = state["incident"]
     try:
         chain = RCA_PROMPT | get_llm().with_structured_output(RCA)
-        rca_result = chain.invoke(
+        rca_result = await chain.ainvoke(
             {
                 "incident": _incident_text(state),
                 "similar_incidents": _format_similar_incidents(
@@ -254,6 +259,8 @@ def rca(state: "AgentState") -> dict:
             rca_result = RCA.model_validate(rca_result)
         rca_result = _ensure_rca_fields(rca_result, state)
         detail = "Generated structured RCA with one LLM call."
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         rca_result = RCA(
             summary="Unable to produce structured RCA",
@@ -281,7 +288,7 @@ def rca(state: "AgentState") -> dict:
     }
 
 
-def finalize(state: "AgentState") -> dict:
+async def finalize(state: "AgentState") -> dict:
     similar_incidents = [
         result
         for result in state.get("similar_incidents", [])

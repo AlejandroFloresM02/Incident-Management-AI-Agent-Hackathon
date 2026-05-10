@@ -55,6 +55,11 @@ backend/data_gen/output/*.jsonl
 *.swo
 *~
 
+# --- Claude Code local files (keep launch.json; ignore everything else) --
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
 # --- OS ------------------------------------------------------------------
 .DS_Store
 Thumbs.db
