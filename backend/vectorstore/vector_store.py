@@ -28,6 +28,8 @@ from shared.config import (
 )
 from shared.schemas import Incident, RetrievalResult
 
+from .quality import compute_trust, score_source_quality
+
 logger = logging.getLogger(__name__)
 
 class IncidentVectorStore:
@@ -104,30 +106,52 @@ class IncidentVectorStore:
         logger.info(f"✅ Upserted {len(ids)} incidents into '{self.collection_name}'")
         return len(ids)
 
+    @staticmethod
+    def _incident_from_metadata(meta: dict) -> Incident:
+        return Incident(
+            id=meta["id"],
+            title=meta["title"],
+            description=meta["description"],
+            severity=meta["severity"],
+            service=meta["service"],
+            tags=meta["tags"].split("|") if meta.get("tags") else [],
+            created_at=datetime.fromisoformat(meta["created_at"].replace("Z", "+00:00")),
+            resolved_at=datetime.fromisoformat(meta["resolved_at"].replace("Z", "+00:00")) if meta.get("resolved_at") else None,
+            resolution=meta.get("resolution") or None,
+            rca_summary=meta.get("rca_summary") or None,
+            requires_human_approval=meta.get("requires_human_approval", False),
+        )
+
     def search(self, query: str, k: int = 5) -> List[RetrievalResult]:
         docs_scores = self._chroma_store.similarity_search_with_score(query, k=k)
         results = []
 
         for doc, distance in docs_scores:
             similarity = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
-            meta = doc.metadata
-
-            incident = Incident(
-                id=meta["id"],
-                title=meta["title"],
-                description=meta["description"],
-                severity=meta["severity"],
-                service=meta["service"],
-                tags=meta["tags"].split("|") if meta.get("tags") else [],
-                created_at=datetime.fromisoformat(meta["created_at"].replace("Z", "+00:00")),
-                resolved_at=datetime.fromisoformat(meta["resolved_at"].replace("Z", "+00:00")) if meta.get("resolved_at") else None,
-                resolution=meta.get("resolution") or None,
-                rca_summary=meta.get("rca_summary") or None,
-                requires_human_approval=meta.get("requires_human_approval", False),
+            incident = self._incident_from_metadata(doc.metadata)
+            source_quality = score_source_quality(incident)
+            trust, warning = compute_trust(similarity, source_quality)
+            results.append(
+                RetrievalResult(
+                    incident=incident,
+                    similarity=similarity,
+                    source_quality=source_quality,
+                    trust=trust,
+                    warning=warning,
+                )
             )
-            results.append(RetrievalResult(incident=incident, similarity=similarity))
 
         return results
+
+    def all_incidents(self) -> List[Incident]:
+        """Return every stored incident for corpus-level quality scoring.
+
+        Reads metadata only — no embeddings, no LLM calls. Used by the
+        data-quality dashboard endpoint.
+        """
+        raw = self._chroma_store._collection.get(include=["metadatas"])
+        metadatas = raw.get("metadatas") or []
+        return [self._incident_from_metadata(meta) for meta in metadatas]
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

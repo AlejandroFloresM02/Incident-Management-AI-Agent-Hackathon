@@ -295,19 +295,27 @@ async def finalize(state: "AgentState") -> dict:
         if result.similarity >= SIMILARITY_THRESHOLD
     ]
     if similar_incidents:
-        confidence = max(0.2, max(result.similarity for result in similar_incidents))
+        # Confidence reflects the best retrieved precedent's *usefulness*, not
+        # just its text similarity. trust = similarity * source_quality.score,
+        # populated upstream in vector_store.search(). This makes the overall
+        # confidence drop automatically when retrieval hits sparse records.
+        best_trust = max(result.trust for result in similar_incidents)
+        best_similarity = max(result.similarity for result in similar_incidents)
+        confidence = max(0.2, best_trust)
+        detail = (
+            f"Assembled final response with {len(similar_incidents)} retrieved "
+            f"incidents. Best similarity {best_similarity:.2f}, best trust "
+            f"{best_trust:.2f}; confidence reflects trust to penalize sparse "
+            f"records."
+        )
     else:
         confidence = 0.3
+        detail = (
+            f"Assembled final response with {len(similar_incidents)} retrieved "
+            f"incidents and confidence {confidence:.2f}."
+        )
 
     return {
         "confidence": confidence,
-        "trace": [
-            TraceStep(
-                step="finalize",
-                detail=(
-                    "Assembled final response with "
-                    f"{len(similar_incidents)} retrieved incidents and confidence {confidence:.2f}."
-                ),
-            )
-        ],
+        "trace": [TraceStep(step="finalize", detail=detail)],
     }
