@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent import run_agent
 from shared.config import CORS_ORIGINS
-from shared.schemas import AgentResponse, Incident
+from shared.schemas import AgentResponse, CorpusQuality, Incident
 
 app = FastAPI(
     title="Incident Management AI Copilot",
@@ -51,3 +51,16 @@ def health() -> dict[str, str]:
 )
 async def analyze_incident(incident: Incident) -> AgentResponse:
     return await run_agent(incident)
+
+
+@app.get(
+    "/api/vectorstore/quality",
+    response_model=CorpusQuality,
+    tags=["vectorstore"],
+    summary="Aggregate data-quality scores for the ingested incident corpus.",
+)
+async def vectorstore_quality() -> CorpusQuality:
+    # Imported lazily so a Chroma misconfiguration doesn't break /api/health.
+    from vectorstore import corpus_quality
+
+    return corpus_quality()

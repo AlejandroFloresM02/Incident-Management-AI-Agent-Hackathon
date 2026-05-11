@@ -19,10 +19,58 @@ export interface Incident {
   requires_human_approval?: boolean;
 }
 
+/**
+ * Per-record quality of an incident stored in the vector store. Independent
+ * of any query — describes whether the record itself is worth learning from.
+ */
+export interface SourceQuality {
+  score: number;
+  resolution_completeness: number;
+  clarity: number;
+  accuracy_heuristic: number;
+  notes: string;
+}
+
 /** One similar past incident retrieved from the vector store. */
 export interface RetrievalResult {
   incident: Incident;
   similarity: number;
+  source_quality?: SourceQuality | null;
+  /** Composite: similarity × source_quality.score. The honest "should I lean on this precedent?" number. */
+  trust: number;
+  /** Set when text match is high but the source record is sparse. */
+  warning?: string | null;
+}
+
+/** One named quality dimension on the data-quality dashboard. */
+export interface MetricScore {
+  name: string;
+  score: number;
+  description: string;
+  detail: string;
+}
+
+/** Count of records bucketed by their per-record source-quality score. */
+export interface QualityDistribution {
+  /** score >= 0.70 */
+  high: number;
+  /** 0.40 <= score < 0.70 */
+  medium: number;
+  /** score < 0.40 */
+  low: number;
+  total: number;
+}
+
+/** Aggregate quality of the full incident corpus. Returned by GET /api/vectorstore/quality. */
+export interface CorpusQuality {
+  record_count: number;
+  source_quality_distribution: QualityDistribution;
+  completeness: MetricScore;
+  accuracy_heuristic: MetricScore;
+  consistency: MetricScore;
+  timeliness: MetricScore;
+  relevance_clarity: MetricScore;
+  retrieval_readiness: MetricScore;
 }
 
 /**

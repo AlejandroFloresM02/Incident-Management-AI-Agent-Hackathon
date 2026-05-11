@@ -32,11 +32,16 @@ import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined'
 import MenuIcon from '@mui/icons-material/Menu'
 import PlaylistAddCheckOutlinedIcon from '@mui/icons-material/PlaylistAddCheckOutlined'
 import PostAddOutlinedIcon from '@mui/icons-material/PostAddOutlined'
+import QueryStatsOutlinedIcon from '@mui/icons-material/QueryStatsOutlined'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined'
 import TroubleshootOutlinedIcon from '@mui/icons-material/TroubleshootOutlined'
+import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 
+import QualityDashboard from './QualityDashboard'
 import type { AgentResponse, Incident, Severity } from './types'
+
+type View = 'copilot' | 'quality'
 
 const drawerWidth = 264
 const API_BASE = 'http://localhost:8000'
@@ -106,12 +111,24 @@ const theme = createTheme({
   },
 })
 
-function Sidebar({ onClose }: { onClose?: () => void }) {
-  const items = [
-    { label: 'Incident Intake', icon: <ContentPasteSearchOutlinedIcon /> },
-    { label: 'Similar Cases', icon: <HistoryOutlinedIcon /> },
-    { label: 'Resolution Plan', icon: <PlaylistAddCheckOutlinedIcon /> },
-    { label: 'RCA Report', icon: <FactCheckOutlinedIcon /> },
+type SidebarItem = {
+  label: string
+  icon: React.ReactNode
+  view: View
+}
+
+function Sidebar({
+  view,
+  onSelect,
+  onClose,
+}: {
+  view: View
+  onSelect: (view: View) => void
+  onClose?: () => void
+}) {
+  const items: SidebarItem[] = [
+    { label: 'Incident Management', icon: <AutoFixHighOutlinedIcon />, view: 'copilot' },
+    { label: 'Data Quality', icon: <QueryStatsOutlinedIcon />, view: 'quality' },
   ]
 
   return (
@@ -133,31 +150,37 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
         <Divider sx={{ borderColor: 'rgba(255,255,255,0.12)' }} />
       </Stack>
       <List sx={{ px: 1.5 }}>
-        {items.map((item, index) => (
-          <ListItemButton
-            key={item.label}
-            selected={index === 0}
-            onClick={onClose}
-            sx={{
-              borderRadius: 1.5,
-              mb: 0.5,
-              color: '#d7deeb',
-              '&.Mui-selected': {
-                bgcolor: 'rgba(31,111,235,0.22)',
-                color: 'white',
-              },
-              '&:hover': {
-                bgcolor: 'rgba(255,255,255,0.08)',
-              },
-            }}
-          >
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>{item.icon}</ListItemIcon>
-            <ListItemText
-              primary={item.label}
-              slotProps={{ primary: { sx: { fontWeight: 700 } } }}
-            />
-          </ListItemButton>
-        ))}
+        {items.map((item) => {
+          const selected = item.view === view
+          return (
+            <ListItemButton
+              key={item.label}
+              selected={selected}
+              onClick={() => {
+                onSelect(item.view)
+                onClose?.()
+              }}
+              sx={{
+                borderRadius: 1.5,
+                mb: 0.5,
+                color: '#d7deeb',
+                '&.Mui-selected': {
+                  bgcolor: 'rgba(31,111,235,0.22)',
+                  color: 'white',
+                },
+                '&:hover': {
+                  bgcolor: 'rgba(255,255,255,0.08)',
+                },
+              }}
+            >
+              <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>{item.icon}</ListItemIcon>
+              <ListItemText
+                primary={item.label}
+                slotProps={{ primary: { sx: { fontWeight: 700 } } }}
+              />
+            </ListItemButton>
+          )
+        })}
       </List>
     </Box>
   )
@@ -308,6 +331,7 @@ function TimelineList({ items }: { items: string[] }) {
 
 export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [view, setView] = useState<View>('copilot')
   const [incidentText, setIncidentText] = useState(sampleIncident)
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -451,12 +475,16 @@ export default function App() {
               <MenuIcon />
             </IconButton>
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-              <Typography variant="h1">Incident Management AI Copilot</Typography>
+              <Typography variant="h1">
+                {view === 'quality' ? 'Data Quality Dashboard' : 'Incident Management AI Copilot'}
+              </Typography>
               <Typography variant="body2" color="text.secondary">
-                Triage logs, retrieve precedent, and draft RCA notes from one focused workspace.
+                {view === 'quality'
+                  ? 'Quality of the historical incidents the copilot retrieves from.'
+                  : 'Triage logs, retrieve precedent, and draft RCA notes from one focused workspace.'}
               </Typography>
             </Box>
-            {headerChip}
+            {view === 'copilot' && headerChip}
           </Toolbar>
         </AppBar>
 
@@ -471,7 +499,7 @@ export default function App() {
               '& .MuiDrawer-paper': { width: drawerWidth, border: 0 },
             }}
           >
-            <Sidebar onClose={() => setMobileOpen(false)} />
+            <Sidebar view={view} onSelect={setView} onClose={() => setMobileOpen(false)} />
           </Drawer>
           <Drawer
             variant="permanent"
@@ -481,7 +509,7 @@ export default function App() {
             }}
             open
           >
-            <Sidebar />
+            <Sidebar view={view} onSelect={setView} />
           </Drawer>
         </Box>
 
@@ -495,6 +523,9 @@ export default function App() {
             pb: 4,
           }}
         >
+          {view === 'quality' ? (
+            <QualityDashboard apiBase={API_BASE} />
+          ) : (
           <Stack spacing={3}>
             {statusAlert}
 
@@ -624,7 +655,9 @@ export default function App() {
                   </Typography>
                 ) : (
                   <Stack spacing={1.5}>
-                    {response.similar_incidents.map((r) => (
+                    {response.similar_incidents.map((r) => {
+                      const sourceScore = r.source_quality?.score ?? null
+                      return (
                       <Box
                         key={r.incident.id}
                         sx={{
@@ -646,13 +679,38 @@ export default function App() {
                           />
                           <Chip
                             size="small"
+                            variant="outlined"
                             color={confidenceColor(r.similarity)}
-                            label={`${Math.round(r.similarity * 100)}% match`}
+                            label={`Similarity ${Math.round(r.similarity * 100)}%`}
+                          />
+                          {sourceScore !== null && (
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              color={confidenceColor(sourceScore)}
+                              label={`Source ${Math.round(sourceScore * 100)}%`}
+                              title={r.source_quality?.notes || undefined}
+                            />
+                          )}
+                          <Chip
+                            size="small"
+                            color={confidenceColor(r.trust)}
+                            label={`Trust ${Math.round(r.trust * 100)}%`}
+                            sx={{ fontWeight: 700 }}
                           />
                           <Typography variant="caption" color="text.secondary">
                             {r.incident.id} - {r.incident.service}
                           </Typography>
                         </Stack>
+                        {r.warning && (
+                          <Alert
+                            severity="warning"
+                            icon={<WarningAmberOutlinedIcon fontSize="small" />}
+                            sx={{ py: 0.25, mb: 0.75 }}
+                          >
+                            <Typography variant="caption">{r.warning}</Typography>
+                          </Alert>
+                        )}
                         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
                           {r.incident.title}
                         </Typography>
@@ -668,7 +726,8 @@ export default function App() {
                           </Typography>
                         )}
                       </Box>
-                    ))}
+                      )
+                    })}
                   </Stack>
                 )}
               </SectionCard>
@@ -749,6 +808,7 @@ export default function App() {
               </SectionCard>
             </Box>
           </Stack>
+          )}
         </Box>
       </Box>
     </ThemeProvider>

@@ -12,8 +12,9 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from shared.schemas import RetrievalResult
+from shared.schemas import CorpusQuality, RetrievalResult
 
+from .quality import score_corpus
 from .vector_store import IncidentVectorStore
 
 logger = logging.getLogger(__name__)
@@ -48,4 +49,13 @@ def search(query: str, k: int = 5) -> list[RetrievalResult]:
     return _get_store().search(query, k=k)
 
 
-__all__ = ["search", "IncidentVectorStore"]
+def corpus_quality() -> CorpusQuality:
+    """Aggregate data-quality scores for the entire ingested corpus.
+
+    Reads metadata only (no embeddings, no LLM) so the dashboard endpoint
+    runs in well under a second on the synthetic corpus.
+    """
+    return score_corpus(_get_store().all_incidents())
+
+
+__all__ = ["search", "corpus_quality", "IncidentVectorStore"]
