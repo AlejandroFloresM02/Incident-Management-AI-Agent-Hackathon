@@ -59,10 +59,23 @@ def _format_similar_incidents(results: list[RetrievalResult]) -> str:
     formatted: list[str] = []
     for index, result in enumerate(results, start=1):
         incident = result.incident
+        # Surface the trust signal to the LLM so it can weight reasoning
+        # derived from sparse precedents lower. Trust = similarity ×
+        # source_quality; a warning fires when text match is high but the
+        # source record is sparse.
+        if result.warning:
+            reliability = (
+                f"LOW (trust {result.trust:.2f}) — {result.warning} "
+                "Treat any reasoning derived from this record as weak; "
+                "hedge accordingly."
+            )
+        else:
+            reliability = f"trust {result.trust:.2f}"
         formatted.append(
             "\n".join(
                 [
-                    f"{index}. {incident.id} ({result.similarity:.2f})",
+                    f"{index}. {incident.id} (similarity {result.similarity:.2f})",
+                    f"Reliability: {reliability}",
                     f"Title: {incident.title}",
                     f"Service: {incident.service}",
                     f"Severity: {incident.severity}",
